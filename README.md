@@ -14,8 +14,8 @@ A powerful command-line toolkit for decoding QR codes from images and camera fee
 
 1. **Clone the repository**:
 ```bash
-git clone <your-repo-url>
-cd qr-toolkit
+git clone https://github.com/skye-cyber/qr-toolkit.git
+cd QRToolkit
 ```
 
 2. **Install dependencies**:
