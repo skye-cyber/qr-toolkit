@@ -40,3 +40,6 @@ venv/
 *.wav
 *.mp3
 *.mp4
+
+# Ignore previous version of files
+"*.prev*"

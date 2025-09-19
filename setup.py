@@ -3,7 +3,7 @@ from setuptools import find_namespace_packages, setup
 
 
 DESCRIPTION = "A toolkit for QR code processing and 2FA secret management"
-EXCLUDE_FROM_PACKAGES = ["build", "dist", "test", "src", "*~", "*.db"]
+EXCLUDE_FROM_PACKAGES = ["build", "dist", "test", "src", "*~", "*.db", "*.prev*"]
 
 
 setup(

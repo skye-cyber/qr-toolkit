@@ -1,5 +1,4 @@
 import re
-import json
 import urllib.parse
 
 
@@ -22,7 +21,7 @@ class DataProcessor:
     @staticmethod
     def is_2fa_secret(data):
         """Check if data contains 2FA secret (otpauth://)"""
-        return data.startswith("otpauth://")
+        return data.startswith(("otpauth://", "otpauth-migration://"))
 
     @staticmethod
     def extract_2fa_secrets(data):
@@ -32,9 +31,12 @@ class DataProcessor:
 
         # Handle multiple secrets or other formats
         secrets = []
-        if "otpauth://" in data:
+        prefix = [
+            _str for _str in ("otpauth-migration://", "otpauth://") if _str in data
+        ][0]
+        if prefix:
             # Simple extraction - can be enhanced
-            secrets = re.findall(r"otpauth://[^\s]+", data)
+            secrets = re.findall(rf"{prefix}[^\s]+", data)
 
         return secrets
 

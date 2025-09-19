@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+import asyncio
 from tqdm.asyncio import tqdm
 from datetime import datetime
 from .core.decoder import QRDecoder
@@ -8,6 +9,15 @@ from .core.processor import DataProcessor
 from .outputs.json_handler import JSONHandler
 from .outputs.url_handler import URLHandler
 from .outputs.text_handler import TextHandler
+
+# from .utils.Execptions import QRToolException
+from .utils.colors import foreground
+from .utils.loger import get_logger
+
+logger = get_logger()
+
+fg = foreground()
+RESET = fg.RESET
 
 
 def main():
@@ -53,6 +63,12 @@ def main():
         "--timeout", type=int, default=30, help="Camera timeout in seconds"
     )
 
+    process_group.add_argument(
+        "--stream",
+        action="store_true",
+        help="Keep reading from camera until terminated.",
+    )
+
     args = parser.parse_args()
 
     # Validate input
@@ -72,105 +88,173 @@ def main():
         parser.error(
             "Please specify an input source (files, directory, camera, or screenshot)"
         )
+    ArgsProcessor(args, input_files).process()
 
-    decoder = QRDecoder()
-    processor = DataProcessor()
-    all_results = []
 
-    try:
-        # Process files
-        for file_path in tqdm(input_files):
-            if not args.quiet:
-                print(f"Processing: {file_path}")
-            results = decoder.decode_from_image(file_path)
-            all_results.extend(results)
+class ArgsProcessor:
+    """
+    Handle Process based on inputs and provided flags
+    Allows args chaining for multiprocessing
+    """
 
+    def __init__(self, args, input_files):
+        self.args = args
+        self.decoder = QRDecoder()
+        self.processor = DataProcessor()
+        self.all_results = []
+        self.input_files = (
+            tqdm(input_files, desc=f"{fg.DWHITE_FG}Files:{RESET}")
+            if len(input_files) > 1
+            else input_files
+        )
+
+    def _map_op_(self) -> None:
+        _map_ = {
+            self.args.camera: self.use_camera,
+            self.args.screenshot: self.use_screenshot,
+        }
+
+        operation_method = next((_map_[key] for key in _map_ if key), None)
+        if operation_method:
+            operation_method()
+
+    def _map_ouputs_(self) -> None:
+        _map_ = {
+            self.args.json: self.output_json,
+            self.args.text: self.output_text,
+        }
+        output_method = next((_map_[key] for key in _map_ if key), None)
+        if output_method:
+            output_method()
+
+    def _map_flags_(self) -> None:
+        _map_ = {
+            self.args.open_url: self.open_url,
+            self.args.copy: self.copy,
+        }
+        flag_method = next((_map_[key] for key in _map_ if key), None)
+        if flag_method:
+            flag_method()
+
+    def use_camera(self):
         # Process camera if requested
-        if args.camera:
-            if not args.quiet:
-                print("Scanning from camera...")
-            results = decoder.decode_from_video(args.timeout)
-            all_results.extend(results)
+        if not self.args.quiet:
+            logger.info(
+                f"{fg.DWHITE_FG}Scanning from camera{RESET}{fg.BBLUE_FG}...{RESET}"
+            )
+            results = self.decoder.decode_from_video(
+                stream=self.args.stream, timeout=self.args.timeout
+            )
 
+            self.all_results.extend(results)
+
+        return
+
+    def use_screenshot(self):
         # TODO: Implement screenshot functionality
-        if args.screenshot:
-            if not args.quiet:
-                print("Screenshot functionality not yet implemented")
+        if not self.args.quiet:
+            logger.warn("Screenshot functionality not yet implemented")
 
-        if not all_results:
-            if not args.quiet:
-                print("No QR codes found", file=sys.stderr)
-            return 1
+    def process_files(self):
+        # Process files
+        for file_path in self.input_files:
+            if not self.args.quiet:
+                if len(self.input_files) == 1:
+                    logger.info(f"Processing: {file_path}")
+            results = self.decoder.decode_from_image(file_path)
+            self.all_results.extend(results)
 
-        # Process results
-        decoded_data = [result["data"] for result in all_results]
+    def output_json(self):
+        # Handle 2FA secrets specifically
+        twofa_secrets = []
+        for data in tqdm(self.decoded_data, desc=f"{fg.DWHITE_FG}Data:{RESET}"):
+            if self.processor.is_2fa_secret(data):
+                twofa_secrets.append(data)
+            else:
+                # Check if data contains 2FA secrets
+                secrets = self.processor.extract_2fa_secrets(data)
+                twofa_secrets.extend(secrets)
 
-        # Handle output based on flags
-        if args.json:
-            # Handle 2FA secrets specifically
-            twofa_secrets = []
-            for data in decoded_data:
-                if processor.is_2fa_secret(data):
-                    twofa_secrets.append(data)
-                else:
-                    # Check if data contains 2FA secrets
-                    secrets = processor.extract_2fa_secrets(data)
-                    twofa_secrets.extend(secrets)
-
-            if twofa_secrets:
-                output_file = (
-                    args.output
-                    or f"2fa_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        if twofa_secrets:
+            output_file = (
+                self.args.output
+                or f"2fa_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
+            saved = JSONHandler.save_2fa_secrets(twofa_secrets, output_file)
+            if saved and not self.args.quiet:
+                logger.info(f"2FA secrets saved to: {fg.BLUE_FG}{output_file}{RESET}")
+            else:
+                logger.warn(f"{fg.FYELLOW_FG}No valid 2fa were found{RESET}")
+        elif self.args.output:
+            # Save generic data as JSON
+            JSONHandler.save_generic_data(self.decoded_data, self.args.output)
+            if not self.args.quiet:
+                logger.info(
+                    f"Data saved to JSON: {fg.BLUE_FG}{fg.LINE}{self.args.output}{RESET}"
                 )
-                JSONHandler.save_2fa_secrets(twofa_secrets, output_file)
-                if not args.quiet:
-                    print(f"2FA secrets saved to: {output_file}")
-            elif args.output:
-                # Save generic data as JSON
-                JSONHandler.save_generic_data(decoded_data, args.output)
-                if not args.quiet:
-                    print(f"Data saved to JSON: {args.output}")
 
-        elif args.text and args.output:
-            # Save as text file
-            text_content = "\n".join(decoded_data)
-            TextHandler.save_to_file(text_content, args.output)
-            if not args.quiet:
-                print(f"Data saved to text file: {args.output}")
+    def output_text(self):
+        # Save as text file
+        output = self.args.output or "qrscan_output.txt"
+        text_content = "\n".join(self.decoded_data)
+        TextHandler.save_to_file(text_content, output)
+        if not self.args.quiet:
+            logger.info(f"Data saved to text file: {fg.CYAN_FG}{output}{RESET}")
 
-        # Handle URL opening
-        if args.open_url:
-            for data in decoded_data:
-                if processor.is_url(data):
-                    URLHandler.open_url(data)
-                    if not args.quiet:
-                        print(f"Opened URL: {data}")
+    def open_url(self):
+        for data in self.decoded_data:
+            if self.processor.is_url(data):
+                URLHandler.open_url(data)
+                if not self.args.quiet:
+                    print(f"Opened URL: {fg.BLUE_FG}{data}{RESET}")
 
-        # Copy to clipboard (only first result)
-        if args.copy and decoded_data:
-            try:
-                import pyperclip
+    def copy(self):
+        try:
+            import pyperclip
 
-                pyperclip.copy(decoded_data[0])
-                if not args.quiet:
-                    print("Copied to clipboard")
-            except ImportError:
-                if not args.quiet:
-                    print(
-                        "pyperclip module required for clipboard functionality",
-                        file=sys.stderr,
-                    )
+            pyperclip.copy(self.decoded_data[0])
+            if not self.args.quiet:
+                print(
+                    f"Copied {fg.LINE}{fg.FGREEN_FG}{self.decoded_data[0]}{RESET} to clipboard"
+                )
+        except ImportError:
+            if not self.args.quiet:
+                print(
+                    "pyperclip module required for clipboard functionality",
+                    file=sys.stderr,
+                )
 
-        # Print to console (default behavior)
-        if args.print and not args.quiet:
-            for i, data in enumerate(decoded_data):
-                print(f"QR Code {i + 1}: {data}")
+    def process(self):
+        try:
+            # Handle base processing operation calls
+            self.process_files()  # For file from input/directory passed
+            self._map_op_()  # Camera and screenshot functionality
 
-        return 0
+            if not self.all_results:
+                if not self.args.quiet:
+                    print("No QR codes found", file=sys.stderr)
+                return 1
 
-    except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
-        return 1
+            # Process results
+            self.decoded_data = [result["data"] for result in self.all_results]
+
+            # Handle output based on flags
+            self._map_ouputs_()
+
+            # Handle (URL opening, Copy to clipboard (only first result))
+            self._map_flags_()
+
+            # Print to console (default behavior)
+            if self.args.print and not self.args.quiet:
+                for i, data in enumerate(self.decoded_data):
+                    print(f"QR Code {i + 1}: {fg.GREEN_FG}{data}{RESET}")
+
+            return 0
+
+        except Exception as e:
+            raise
+            print(f"Error: {str(e)}", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":

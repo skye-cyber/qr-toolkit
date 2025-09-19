@@ -1,4 +1,3 @@
-# qr_toolkit/outputs/url_handler.py
 import webbrowser
 from urllib.parse import urlparse
 

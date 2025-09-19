@@ -1,0 +1,2 @@
+class QRToolException(Exception):
+    pass

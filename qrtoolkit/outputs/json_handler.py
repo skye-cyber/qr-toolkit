@@ -1,8 +1,7 @@
-# qr_toolkit/outputs/json_handler.py
 import json
 import os
 from datetime import datetime
-from core.processor import DataProcessor
+from ..core.processor import DataProcessor
 
 
 class JSONHandler:
@@ -12,21 +11,17 @@ class JSONHandler:
         if not output_file:
             output_file = f"2fa_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
-        data = {
-            'version': 1,
-            'generated': datetime.now().isoformat(),
-            'entries': []
-        }
+        data = {"version": 1, "generated": datetime.now().isoformat(), "entries": []}
 
         for secret in secrets:
             parsed = DataProcessor.parse_2fa_url(secret)
             # Only add valid 2FA entries
-            if parsed.get('secret'):
-                data['entries'].append(parsed)
+            if parsed.get("secret"):
+                data["entries"].append(parsed)
 
         # Only create file if we have valid entries
-        if data['entries']:
-            with open(output_file, 'w') as f:
+        if data["entries"]:
+            with open(output_file, "w") as f:
                 json.dump(data, f, indent=2)
             return output_file
         return None
@@ -34,7 +29,7 @@ class JSONHandler:
     @staticmethod
     def save_generic_data(data_list, output_file):
         """Save generic data to JSON file"""
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             json.dump(data_list, f, indent=2)
         return output_file
 
